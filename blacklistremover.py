@@ -17,4 +17,4 @@ def remove_strings_from_blacklist():
 
 while True:
     remove_strings_from_blacklist()
-    time.sleep(120)  # Sleep for 5 minutes (300 seconds)
+    time.sleep(20)  # Sleep for 5 minutes (300 seconds)
