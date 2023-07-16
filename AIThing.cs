@@ -141,55 +141,56 @@ public class AIThing : MonoBehaviour
             string voicemodelUuid = "";
             string textToSay = "";
             string character = "";
+            string characterVoice = "";
 
             // Change the following if statements to match the characters you want to use
             if (line.StartsWith("Spongebob:"))
             {
-                textToSay = line.Replace("Spongebob:", "");
                 voicemodelUuid = "5c14f88a-fa6a-4489-b177-bd948f03e32b";
+                characterVoice = "spongebob";
+                
+                textToSay = line.Replace("Spongebob:", "");
                 character = "Spongebob";
             }
             else if (line.StartsWith("Patrick:"))
             {
-                textToSay = line.Replace("Patrick:", "");
                 voicemodelUuid = "3b2755d1-11e2-4112-b75b-01c47560fb9c";
+                characterVoice = "patrick";
+                
+                textToSay = line.Replace("Patrick:", "");
                 character = "Patrick";
             }
             else if (line.StartsWith("Squidward:"))
             {
                 voicemodelUuid = "42b30e65-f4cb-4962-ac87-06f3671ccbe4";
+                characterVoice = "squidward";
+
                 textToSay = line.Replace("Squidward:", "");
                 character = "Squidward";
             }
             else if (line.StartsWith("Mr. Krabs:"))
             {
                 voicemodelUuid = "8270ecfc-1491-433e-b4c2-26c1accfe3f0";
+                characterVoice = "mr-krabs";
+                
                 textToSay = line.Replace("Mr. Krabs:", "");
                 character = "MrKrabs";
             }
             else if (line.StartsWith("Sandy:"))
             {
                 voicemodelUuid = "fd030eea-d80f-4125-8af6-5d28ce21eff6";
+                characterVoice = "sandy-cheeks";
+                
                 textToSay = line.Replace("Sandy:", "");
                 character = "Sandy";
             }
             else if (line.StartsWith("Gary:"))
             {
                 voicemodelUuid = "49474b46-b016-4cac-ad6f-ee070c51ece1";
+                characterVoice = "butters-90s";
+               
                 textToSay = line.Replace("Gary:", "");
                 character = "Gary";
-            }
-            else if (line.StartsWith("Plankton:"))
-            {
-                voicemodelUuid = "a2a27810-bd2c-4170-b8e7-a2ce0cf27448";
-                textToSay = line.Replace("Plankton:", "");
-                character = "Plankton";
-            }
-            else if (line.StartsWith("Karen:"))
-            {
-                voicemodelUuid = "2f7d49be-3e6f-4a08-86c9-5731a2f0750b";
-                textToSay = line.Replace("Karen:", "");
-                character = "Karen";
             }
             if (textToSay == "")
                 continue;
@@ -197,16 +198,17 @@ public class AIThing : MonoBehaviour
             var jsonObj = new
             {
                 speech = textToSay,
-                voicemodel_uuid = voicemodelUuid,
+                voice = characterVoice,
+               // voicemodel_uuid = voicemodelUuid,
             };
 
             var content = new StringContent(JsonConvert.SerializeObject(jsonObj), Encoding.UTF8, "application/json");
-
             var response2 = await _client.PostAsync("https://api.uberduck.ai/speak", content);
             var responseString = await response2.Content.ReadAsStringAsync();
 
             if (response2.IsSuccessStatusCode)
             {
+                Debug.Log(responseString);
                 dialogues.Add(new Dialogue
                 {
                     uuid = JsonConvert.DeserializeObject<SpeakResponse>(responseString).uuid,
