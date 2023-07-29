@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,85 +16,103 @@ using TMPro;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 using UnityEngine.Video;
-
-
-
+using System.Net;
 
 #pragma warning disable CS4014
 
 public class AIThing : MonoBehaviour
 {
     private Random _random = new Random();
-    private List<string> blacklist;
-    private string blacklistPath;
+
     //should probably change this to a safer method of storing the keys
     [SerializeField] private string openAIKey;
-    [SerializeField] private string uberDuckSecret;
-    [SerializeField] private string uberDuckKey;
+    [SerializeField] private string fakeYouUsernameOrEMail;
+    [SerializeField] private string fakeYouPassword;
 
     [SerializeField] private AudioSource audioSource;
+
+    [SerializeField] public AudioClip[] audioClips; // Put in here for a character like gary that does not have a voicemodel and speaks gibberish
 
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
     [SerializeField] private TextMeshProUGUI subtitles;
     [SerializeField] private VideoPlayer videoPlayer;
-    [SerializeField] private List<VideoClip> _clips;
+    [SerializeField] private List<AudioClip> _clips;
     private HttpClient _client = new();
     private OpenAIApi _openAI;
-    [SerializeField] public AudioClip[] audioClips;
-    async Task HandleParsingError()
-    {
-        Debug.LogError("Ignore");
-        await Task.Delay(40); // Delay
-        SceneManager.LoadScene("1.0.1");
-    }
     // Start is called before the first frame update
+
     void Start()
+
+
+
     {
         _openAI = new OpenAIApi(openAIKey);
 
-        _client.DefaultRequestHeaders.Add("Authorization", $"Basic {Convert.ToBase64String(Encoding.UTF8.GetBytes($"{uberDuckKey}:{uberDuckSecret}"))}");
+        Init();
+    }
+
+    async void Init()
+    {
+        if (!File.Exists($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt"))
+            File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", "");
+
+        string cookie = File.ReadAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt");
+
+        if (cookie == "")
+        {
+            var obj =
+                new
+                {
+                    username_or_email = fakeYouUsernameOrEMail,
+                    password = fakeYouPassword
+                };
+
+            var response = await _client.PostAsync("https://api.fakeyou.com/login",
+                new StringContent(JsonConvert.SerializeObject(obj), Encoding.UTF8, "application/json"));
+            var d = JsonConvert.SerializeObject(response.Headers.GetValues("set-cookie").First());
+            var l = d.Split(';');
+            Debug.Log(d);
+            cookie = l[0].Replace("session=", "");
+            cookie = cookie.Replace("\"", "");
+            File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", cookie);
+        }
+
+        _client.DefaultRequestHeaders.Add("Authorization", cookie);
+        _client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // Read the blacklist
+        List<string> blacklist = new List<string>();
+        string blacklistPath = $"{Environment.CurrentDirectory}\\Assets\\Scripts\\blacklist.json";
+        if (File.Exists(blacklistPath))
+        {
+            blacklist = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(blacklistPath));
+        }
 
         // Pick a random topic
-        List<string> topics = JsonConvert.DeserializeObject<List<string>>(
-            File.ReadAllText($"{Application.dataPath}/Scripts/topics.json"));
+        List<string> topics =
+            JsonConvert.DeserializeObject<List<string>>(
+                File.ReadAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\topics.json"));
         string topic = topics[_random.Next(0, topics.Count)];
-        if (topics.Count > 0)
+
+        // Add the chosen topic to the blacklist and write it back to the file
+        if (!blacklist.Contains(topic))
         {
-            int randomIndex = _random.Next(0, topics.Count);
-            topic = topics[randomIndex];
-            topics.RemoveAt(randomIndex);
+            blacklist.Add(topic);
+            File.WriteAllText(blacklistPath, JsonConvert.SerializeObject(blacklist));
         }
-        // Restarts if no topics are found
-        else
-        {
-            Debug.LogError("No topics available. Restarting the scene...");
-            SceneManager.LoadScene("1.0.1"); // Replace "1.0.1" with the desired scene to load
-            return;
-        }
-        // Makes a blacklist for non repeating topics
-        blacklistPath = $"{Application.dataPath}/Scripts/blacklist.json";
-        blacklist = JsonConvert.DeserializeObject<List<string>>(File.ReadAllText(blacklistPath));
-        topics.RemoveAll(t => blacklist.Contains(t));
-
-
-
 
 
         //play the timecards/intro
         if (_clips.Count > 0)
         {
-            videoPlayer.clip = _clips[_random.Next(0, _clips.Count)];
-            videoPlayer.Play();
+            audioSource.clip = _clips[_random.Next(0, _clips.Count)];
+            audioSource.Play();
             StartCoroutine(waitForTransition(topic));
         }
-
         else
         {
             Generate(topic);
         }
-
-
-
     }
 
     private IEnumerator waitForTransition(string topic)
@@ -112,13 +131,12 @@ public class AIThing : MonoBehaviour
         if (File.Exists("Assets/Scripts/Next.txt"))
             text = File.ReadAllLines("Assets/Scripts/Next.txt");
 
-        // Delete the script from the file so you don't get the same script twice
+        //delete the script from the file so you don't get the same script twice
         File.WriteAllText("Assets/Scripts/Next.txt", "");
         List<Dialogue> dialogues = new List<Dialogue>();
 
         if (text.Length == 0)
         {
-
             await GenerateNext(topic);
             text = File.ReadAllLines("Assets/Scripts/Next.txt");
             List<string> topics =
@@ -131,98 +149,83 @@ public class AIThing : MonoBehaviour
         {
             GenerateNext(topic);
         }
-        blacklist.Add(topic);
-        string blacklistJson = JsonConvert.SerializeObject(blacklist);
-        File.WriteAllText(blacklistPath, blacklistJson);
-
 
         foreach (var line in text)
         {
             string voicemodelUuid = "";
             string textToSay = "";
             string character = "";
-            string characterVoice = "";
 
-            // Change the following if statements to match the characters you want to use
-            if (line.StartsWith("Spongebob:"))
+            // if line starts with character here
+            if (line.StartsWith("SpongeBob:"))
             {
-                voicemodelUuid = "5c14f88a-fa6a-4489-b177-bd948f03e32b";
-                characterVoice = "spongebob";
-                
+                textToSay = line.Replace("SpongeBob:", "");
+                voicemodelUuid = "TM:618j8qwddnsn";
+                character = "spongebob";
+            }
+            else if (line.StartsWith("Spongebob:"))
+            {
                 textToSay = line.Replace("Spongebob:", "");
-                character = "Spongebob";
+                voicemodelUuid = "TM:618j8qwddnsn";
+                character = "spongebob";
             }
             else if (line.StartsWith("Patrick:"))
             {
-                voicemodelUuid = "3b2755d1-11e2-4112-b75b-01c47560fb9c";
-                characterVoice = "patrick";
-                
                 textToSay = line.Replace("Patrick:", "");
-                character = "Patrick";
+                voicemodelUuid = "TM:ptcaavcfhwxd";
+                character = "patrick";
+            }
+            else if (line.StartsWith("Mr. Krabs"))
+            {
+                voicemodelUuid = "TM:ade4ta7rc720";
+                textToSay = line.Replace("Mr. Krabs", "");
+                character = "mrkrabs";
             }
             else if (line.StartsWith("Squidward:"))
             {
-                voicemodelUuid = "42b30e65-f4cb-4962-ac87-06f3671ccbe4";
-                characterVoice = "squidward";
-
-                textToSay = line.Replace("Squidward:", "");
-                character = "Squidward";
-            }
-            else if (line.StartsWith("Mr. Krabs:"))
-            {
-                voicemodelUuid = "8270ecfc-1491-433e-b4c2-26c1accfe3f0";
-                characterVoice = "mr-krabs";
-                
-                textToSay = line.Replace("Mr. Krabs:", "");
-                character = "MrKrabs";
+                voicemodelUuid = "TM:4e2xqpwqaggr";
+                textToSay = line.Replace("Squidward:", "").ToUpper(); //converting to caps because funny loudward
+                character = "squidward";
             }
             else if (line.StartsWith("Sandy:"))
             {
-                voicemodelUuid = "fd030eea-d80f-4125-8af6-5d28ce21eff6";
-                characterVoice = "sandy-cheeks";
-                
+                voicemodelUuid = "TM:eaachm5yecgz";
                 textToSay = line.Replace("Sandy:", "");
-                character = "Sandy";
+                character = "sandy";
             }
-            else if (line.StartsWith("Gary:"))
-            {
-                voicemodelUuid = "49474b46-b016-4cac-ad6f-ee070c51ece1";
-                characterVoice = "butters-90s";
-               
-                textToSay = line.Replace("Gary:", "");
-                character = "Gary";
-            }
+
             if (textToSay == "")
                 continue;
 
             var jsonObj = new
             {
-                speech = textToSay,
-                voice = characterVoice,
-               // voicemodel_uuid = voicemodelUuid,
+                inference_text = textToSay,
+                tts_model_token = voicemodelUuid,
+                uuid_idempotency_token = Guid.NewGuid().ToString()
             };
-
             var content = new StringContent(JsonConvert.SerializeObject(jsonObj), Encoding.UTF8, "application/json");
-            var response2 = await _client.PostAsync("https://api.uberduck.ai/speak", content);
-            var responseString = await response2.Content.ReadAsStringAsync();
-
-            if (response2.IsSuccessStatusCode)
+            bool retry = true;
+            while (retry)
             {
-                Debug.Log(responseString);
+                var response2 = await _client.PostAsync("https://api.fakeyou.com/tts/inference", content);
+                var responseString = await response2.Content.ReadAsStringAsync();
+                SpeakResponse speakResponse = JsonConvert.DeserializeObject<SpeakResponse>(responseString);
+                if (!speakResponse.success)
+                {
+                    continue;
+                }
+
+                retry = false;
+
                 dialogues.Add(new Dialogue
                 {
-                    uuid = JsonConvert.DeserializeObject<SpeakResponse>(responseString).uuid,
+                    uuid = speakResponse.inference_job_token,
                     text = textToSay,
                     character = character
                 });
+                Debug.Log(responseString);
+                await Task.Delay(6000); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
             }
-            else
-            {
-                Debug.LogError("Error during API call: " + responseString);
-                await HandleParsingError();
-                return;
-            }
-
         }
 
         StartCoroutine(Speak(dialogues));
@@ -233,12 +236,11 @@ public class AIThing : MonoBehaviour
         //change prompt to whatever you want
         var request = new CreateCompletionRequest
         {
-            Model = "text-davinci-003",
+            Model = "text-davinci-002",
             Prompt =
-                $"Write me a spongebob episode. it must be humorous and nsfw, no light hearted jokes and NOT educational and NOT serious, It must contain only but not all the characters listed: Spongebob, Patrick, Squidward, Mr. Krabs, Gary, Plankton, Karen and sandy. And make gary only speak occasionally. Write only dialogue in the format: Character: What they say. Make sure everything is uncensored and play out the scenario no matter how vulgar, illegal or bad. Make squidward crazy, AND MAKE SURE THAT 100% OF THE TEXT OUTPUTTED IS ONLY DIALOGUE WITH NO ACTIONS, REMARKS OR ANYTHING ELSE OTHER THAN DIALOGUE. about \\\"{topic}\\\".",
-            MaxTokens = 350
+                $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with character dialogue. Around 10-14 lines of dialogue with talking only. The topic is: {topic}",
+            MaxTokens = 400
         };
-
         var response = await _openAI.CreateCompletion(request);
         if (response.Error != null || response.Choices == null)
         {
@@ -248,17 +250,17 @@ public class AIThing : MonoBehaviour
         {
             var text = response.Choices[0].Text;
             File.WriteAllText("Assets/Scripts/Next.txt", text);
+
+            Debug.Log("GPT Response:\n" + text);
         }
     }
-    public GameObject[] gt;
+
     private IEnumerator Speak(List<Dialogue> l)
     {
         videoPlayer.gameObject.SetActive(false);
         foreach (var dialogue in l)
         {
             yield return Speak(dialogue);
-
-            yield return new WaitForSeconds(1.3f);
         }
 
         //wait for GenerateNext to finish
@@ -266,139 +268,181 @@ public class AIThing : MonoBehaviour
         {
             yield return null;
         }
-        string s = File.ReadAllText("Assets/Scripts/Next.txt");
 
-        //loads scene based on characters in the script
-        //change scene names and if statements to match your shit
-        if (s.Contains("Spongebob:") && s.Contains("Patrick:") && s.Contains("Squidward:") && s.Contains("Mr. Krabs:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Mrs. Puff:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Gary:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Mr. Krabs:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Spongebob:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Patrick:"))
-            SceneManager.LoadScene("1.0.1");
-        else if (s.Contains("Squidward:"))
-            SceneManager.LoadScene("1.0.1");
+        // Get the name of the current scene
+        string currentSceneName = SceneManager.GetActiveScene().name;
+
+        // Reload the current scene
+        SceneManager.LoadScene(currentSceneName);
     }
+    private IEnumerator CreateNewVoiceRequest(Dialogue d, Action<string> callback)
+    {
+        var jsonObj = new
+        {
+            tts_model_token = d.model,
+            uuid_idempotency_token = Guid.NewGuid().ToString(),
+            inference_text = d.text,
+        };
 
+        var content = new StringContent(JsonConvert.SerializeObject(jsonObj), Encoding.UTF8, "application/json");
+        var response = _client.PostAsync("https://api.fakeyou.com/tts/inference", content).Result;
 
+        if (response.IsSuccessStatusCode)
+        {
+            var responseString = response.Content.ReadAsStringAsync().Result;
+            var speakResponse = JsonConvert.DeserializeObject<SpeakResponse>(responseString);
+
+            callback(speakResponse.inference_job_token);
+        }
+        else
+        {
+            Debug.LogError("Error in FakeYou API request: " + response.StatusCode);
+            callback(null);
+        }
+        yield return null;
+    }
+    public GameObject[] gt;
+    private IEnumerator TurnToSpeaker(Transform objectTransform, Transform speakerTransform)
+    {
+        Vector3 direction = (speakerTransform.position - objectTransform.position).normalized;
+
+        // Remove the vertical component of the direction
+        direction.y = 0;
+
+        if (direction != Vector3.zero)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+
+            // Gradually rotate the object to face the speaker
+            while (Quaternion.Angle(objectTransform.rotation, targetRotation) > 0.05f)
+            {
+                objectTransform.rotation = Quaternion.Slerp(objectTransform.rotation, targetRotation, Time.deltaTime * 2.0f);
+
+                // Yield control to the next frame
+                yield return null;
+            }
+        }
+    }
     private IEnumerator Speak(Dialogue d)
     {
-        while (JsonConvert.DeserializeObject<StatusResponse>(_client.GetAsync($"https://api.uberduck.ai/speak-status?uuid={d.uuid}").Result.Content.ReadAsStringAsync().Result).path == null)
+        var content = _client.GetAsync($"https://api.fakeyou.com/tts/job/{d.uuid}").Result.Content;
+        Debug.Log(content.ReadAsStringAsync().Result);
+        var v = JsonConvert.DeserializeObject<GetResponse>(content.ReadAsStringAsync().Result);
+        if (v.state == null || v.state.status == "pending" || v.state.status == "started" || v.state.status == "attempt_failed")
         {
-            yield return null;
+            yield return new WaitForSeconds(1.5f); // for rate limiting
+            yield return Speak(d);
         }
-
-        if (GameObject.Find(d.character) != null && _cinemachineVirtualCamera != null)
+        else if (v.state.status == "complete_success")
         {
-            GameObject character = GameObject.Find(d.character);
-            Transform t = GameObject.Find(d.character).transform;
-            _cinemachineVirtualCamera.LookAt = t;
-            _cinemachineVirtualCamera.Follow = t;
-
-            if (gt.Length > 0)
+            if (GameObject.Find(d.character) != null && _cinemachineVirtualCamera != null)
             {
-                foreach (GameObject obj in gt)
+                GameObject character = GameObject.Find(d.character);
+                Transform t = GameObject.Find(d.character).transform;
+                _cinemachineVirtualCamera.LookAt = t;
+                _cinemachineVirtualCamera.Follow = t;
+
+                if (gt.Length > 0)
                 {
-                    if (obj != null)
+                    foreach (GameObject obj in gt)
                     {
-                        Vector3 direction = (t.position - obj.transform.position).normalized;
-
-                        // Remove the vertical component of the direction
-                        direction.y = 0;
-
-                        if (direction != Vector3.zero)
+                        if (obj != null)
                         {
-                            Quaternion rotation = Quaternion.LookRotation(direction);
-                            obj.transform.rotation = rotation;
+                            // Start coroutine for each object to turn towards the speaker
+                            StartCoroutine(TurnToSpeaker(obj.transform, t));
                         }
                     }
                 }
             }
 
-            if (subtitles != null)
+                if (subtitles != null)
                 subtitles.text = d.text;
 
-            var v = JsonConvert.DeserializeObject<StatusResponse>(_client.GetAsync($"https://api.uberduck.ai/speak-status?uuid={d.uuid}").Result.Content.ReadAsStringAsync().Result);
-
-            using (var uwr = UnityWebRequestMultimedia.GetAudioClip(v.path, AudioType.WAV))
+            using (var uwr = UnityWebRequestMultimedia.GetAudioClip($"https://storage.googleapis.com/vocodes-public{v.state.maybe_public_bucket_wav_audio_path}",
+                AudioType.WAV)) //https://docs.unity3d.com/ScriptReference/Networking.UnityWebRequestMultimedia.GetAudioClip.html
             {
                 yield return uwr.SendWebRequest();
-
                 if (uwr.result == UnityWebRequest.Result.ConnectionError)
                 {
                     Debug.Log(uwr.error);
                 }
-                else if (uwr.responseCode == 403)
-                {
-                    Debug.LogError("Access to the resource is forbidden. Restarting the scene...");
-                    SceneManager.LoadScene("1.0.1"); // Replace 1.0.1 with whatever scene you want to load when uberduck dies
-                }
                 else
                 {
-                    if (uwr.result == UnityWebRequest.Result.ProtocolError)
+                    audioSource.clip = DownloadHandlerAudioClip.GetContent(uwr);
+                    //Gary meow, Put meowing in the inspector
+                    if (d.character == "Gary")
                     {
-                        Debug.LogError("Protocol error occurred while downloading audio clip.");
-                    }
-                    else
-                    {
-                        audioSource.clip = DownloadHandlerAudioClip.GetContent(uwr);
-
-                        // Shuts up gary
-                        if (d.character == "Gary")
-                        {
-                            audioSource = GetComponent<AudioSource>();
-                            audioSource.clip = audioClips[1];
-                            audioSource.Play();
-
-                            yield return new WaitForSeconds(5);
-
-                            audioSource.Stop();
-                        }
-                        // loudward
-                        else if (d.character == "Squidward")
-                        {
-                            float[] clipData = new float[audioSource.clip.samples * audioSource.clip.channels];
-                            audioSource.clip.GetData(clipData, 0);
-                            for (int i = 0; i < clipData.Length; i++)
-                            {
-                                clipData[i] *= 1.5f;
-                            }
-
-                            audioSource.clip.SetData(clipData, 0);
-                        }
+                        audioSource = GetComponent<AudioSource>();
+                        audioSource.clip = audioClips[1];
                         audioSource.Play();
 
-                        // Play the animation on the character object
-                        float audioLength = audioSource.clip.length;
-                        Animator characterAnimator = character.GetComponent<Animator>();
+                        yield return new WaitForSeconds(5);
 
-                        // Check if the characterAnimator exists
+                        audioSource.Stop();
+                    }
+                    else if (d.character == "Squidward")
+                    {
+                        float[] clipData = new float[audioSource.clip.samples * audioSource.clip.channels];
+                        audioSource.clip.GetData(clipData, 0);
+                        for (int i = 0; i < clipData.Length; i++)
+                        {
+                            clipData[i] *= 1.5f;
+                        }
+
+                        audioSource.clip.SetData(clipData, 0);
+                    }
+
+                    GameObject character = GameObject.Find(d.character);
+                    if (character != null)
+                    {
+                        // Get the Animator component attached to the character
+                        Animator characterAnimator = character.GetComponent<Animator>();
                         if (characterAnimator != null)
                         {
-                            characterAnimator.SetBool("Speaking", true);
-
-                            // Wait for the duration of the audio clip
-                            yield return new WaitForSeconds(audioLength);
-
-                            // Stop the animation by resetting the bool parameter
-                            characterAnimator.SetBool("Speaking", false);
-
-                            // Wait for a short duration to allow the animation to stop
-                            yield return new WaitForSeconds(0.1f);
-                        }
-
-                        while (audioSource.isPlaying)
-                        {
-                            yield return null;
+                            // Start the speaking animation
+                            characterAnimator.SetBool("isSpeaking", true);
                         }
                     }
+
+                    audioSource.Play();
+
+                    // Wait for the audio clip to finish playing
+                    yield return new WaitForSeconds(audioSource.clip.length);
+
+                    // Stop the speaking animation
+                    if (character != null)
+                    {
+                        Animator characterAnimator = character.GetComponent<Animator>();
+                        if (characterAnimator != null)
+                        {
+                            characterAnimator.SetBool("isSpeaking", false);
+                        }
+                    }
+
+                    while (audioSource.isPlaying)
+                        yield return null;
                 }
+            }
+        }
+        else
+        {
+            // Create a new voice request
+            string newUuid = null;
+
+            // Create a new voice request
+            yield return CreateNewVoiceRequest(d, result => { newUuid = result; });
+
+            if (!string.IsNullOrEmpty(newUuid))
+            {
+                // Update the uuid of the dialogue
+                d.uuid = newUuid;
+
+                // Recursively call Speak with the updated dialogue
+                yield return Speak(d);
+            }
+            else
+            {
+                Debug.LogError("Failed to create new voice request");
             }
         }
     }
