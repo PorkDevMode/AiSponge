@@ -30,7 +30,7 @@ public class AIThing : MonoBehaviour
     [SerializeField] private string fakeYouPassword;
 
     [SerializeField] private AudioSource audioSource;
-
+    [SerializeField] private TextMeshProUGUI topicText;
     [SerializeField] public AudioClip[] audioClips; // Put in here for a character like gary that does not have a voicemodel and speaks gibberish
 
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
@@ -39,23 +39,18 @@ public class AIThing : MonoBehaviour
     [SerializeField] private List<AudioClip> _clips;
     private HttpClient _client = new();
     private OpenAIApi _openAI;
-    // Start is called before the first frame update
+
     public VideoClip clipToPlay;
+
     IEnumerator LoadSceneAfterDelay(string sceneName, float delay)
     {
-        // Wait for the specified delay
         yield return new WaitForSeconds(delay);
-
-        // Load the scene
         SceneManager.LoadScene(sceneName);
     }
+
     void Start()
-
-
-
     {
         _openAI = new OpenAIApi(openAIKey);
-
         Init();
     }
 
@@ -68,12 +63,11 @@ public class AIThing : MonoBehaviour
 
         if (cookie == "")
         {
-            var obj =
-                new
-                {
-                    username_or_email = fakeYouUsernameOrEMail,
-                    password = fakeYouPassword
-                };
+            var obj = new
+            {
+                username_or_email = fakeYouUsernameOrEMail,
+                password = fakeYouPassword
+            };
 
             var response = await _client.PostAsync("https://api.fakeyou.com/login",
                 new StringContent(JsonConvert.SerializeObject(obj), Encoding.UTF8, "application/json"));
@@ -97,7 +91,6 @@ public class AIThing : MonoBehaviour
         }
 
         // Pick a random topic
-        // Pick a random topic
         List<string> topics =
             JsonConvert.DeserializeObject<List<string>>(
                 File.ReadAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\topics.json"));
@@ -110,8 +103,13 @@ public class AIThing : MonoBehaviour
 
             StartCoroutine(LoadSceneAfterDelay("1.0.1", 5.0f));
         }
+
         string topic = topics[_random.Next(0, topics.Count)];
 
+        if (topicText != null)
+        {
+            topicText.text = "Current Topic: " + topic;
+        }
         // Add the chosen topic to the blacklist and write it back to the file
         if (!blacklist.Contains(topic))
         {
@@ -141,14 +139,13 @@ public class AIThing : MonoBehaviour
 
         Generate(topic);
     }
+
     IEnumerator RetryGenerateAfterDelay(string topic)
     {
-        // Wait for 15 seconds
         yield return new WaitForSeconds(15);
-
-        // Retry Generate method
         Generate(topic);
     }
+
     async void Generate(string topic)
     {
         string[] text = new[] { "" };
@@ -173,6 +170,8 @@ public class AIThing : MonoBehaviour
         {
             GenerateNext(topic);
         }
+
+        List<Task> ttsTasks = new List<Task>();
 
         foreach (var line in text)
         {
@@ -227,49 +226,66 @@ public class AIThing : MonoBehaviour
             if (textToSay == "")
                 continue;
 
-            var jsonObj = new
-            {
-                inference_text = textToSay,
-                tts_model_token = voicemodelUuid,
-                uuid_idempotency_token = Guid.NewGuid().ToString()
-            };
-            var content = new StringContent(JsonConvert.SerializeObject(jsonObj), Encoding.UTF8, "application/json");
-            bool retry = true;
-            while (retry)
-            {
-                var response2 = await _client.PostAsync("https://api.fakeyou.com/tts/inference", content);
-                var responseString = await response2.Content.ReadAsStringAsync();
-                SpeakResponse speakResponse = JsonConvert.DeserializeObject<SpeakResponse>(responseString);
-                if (!speakResponse.success)
-                {
-                    await Task.Delay(15000); // wait for 15 seconds before retrying
-                    continue;
-                }
-
-                retry = false;
-
-                dialogues.Add(new Dialogue
-                {
-                    uuid = speakResponse.inference_job_token,
-                    text = textToSay,
-                    character = character
-                });
-                Debug.Log(responseString);
-                await Task.Delay(4500); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
-            }
+            ttsTasks.Add(CreateTTSRequest(textToSay, voicemodelUuid, dialogues, character));
         }
+
+        await Task.WhenAll(ttsTasks);
 
         StartCoroutine(Speak(dialogues));
     }
 
+    private async Task CreateTTSRequest(string textToSay, string voicemodelUuid, List<Dialogue> dialogues, string character)
+    {
+        var jsonObj = new
+        {
+            inference_text = textToSay,
+            tts_model_token = voicemodelUuid,
+            uuid_idempotency_token = Guid.NewGuid().ToString()
+        };
+        var content = new StringContent(JsonConvert.SerializeObject(jsonObj), Encoding.UTF8, "application/json");
+
+        bool retry = true;
+        while (retry)
+        {
+            var response2 = await _client.PostAsync("https://api.fakeyou.com/tts/inference", content);
+            var responseString = await response2.Content.ReadAsStringAsync();
+            SpeakResponse speakResponse = null;
+            try
+            {
+                speakResponse = JsonConvert.DeserializeObject<SpeakResponse>(responseString);
+            }
+            catch (JsonReaderException)
+            {
+                Debug.Log("Error parsing API response. Probably due to rate limiting. Waiting 10 seconds before retrying.");
+                await Task.Delay(10000);
+                continue;
+            }
+
+            if (!speakResponse.success)
+            {
+                continue;
+            }
+
+            retry = false;
+
+            dialogues.Add(new Dialogue
+            {
+                uuid = speakResponse.inference_job_token,
+                text = textToSay,
+                character = character
+            });
+            Debug.Log(responseString);
+            await Task.Delay(6000); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
+        }
+    }
+
     private async Task GenerateNext(string topic)
     {
-        //change prompt to whatever you want
         var request = new CreateCompletionRequest
         {
             Model = "text-davinci-002",
             Prompt =
-                $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with character dialogue. Around 12 - 15 lines of dialogue with talking only and long sentences. The topic is: {topic}",
+                $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
             MaxTokens = 700
         };
         var response = await _openAI.CreateCompletion(request);
@@ -294,18 +310,15 @@ public class AIThing : MonoBehaviour
             yield return Speak(dialogue);
         }
 
-        //wait for GenerateNext to finish
         while (File.ReadAllText("Assets/Scripts/Next.txt") == "")
         {
             yield return null;
         }
 
-        // Get the name of the current scene
         string currentSceneName = SceneManager.GetActiveScene().name;
-
-        // Reload the current scene
         SceneManager.LoadScene(currentSceneName);
     }
+
     private IEnumerator CreateNewVoiceRequest(Dialogue d, Action<string> callback)
     {
         var jsonObj = new
@@ -332,28 +345,26 @@ public class AIThing : MonoBehaviour
         }
         yield return null;
     }
+
     public GameObject[] gt;
+
     private IEnumerator TurnToSpeaker(Transform objectTransform, Transform speakerTransform)
     {
         Vector3 direction = (speakerTransform.position - objectTransform.position).normalized;
-
-        // Remove the vertical component of the direction
         direction.y = 0;
 
         if (direction != Vector3.zero)
         {
             Quaternion targetRotation = Quaternion.LookRotation(direction);
 
-            // Gradually rotate the object to face the speaker
             while (Quaternion.Angle(objectTransform.rotation, targetRotation) > 0.05f)
             {
                 objectTransform.rotation = Quaternion.Slerp(objectTransform.rotation, targetRotation, Time.deltaTime * 2.0f);
-
-                // Yield control to the next frame
                 yield return null;
             }
         }
     }
+
     private IEnumerator Speak(Dialogue d)
     {
         var content = _client.GetAsync($"https://api.fakeyou.com/tts/job/{d.uuid}").Result.Content;
@@ -361,7 +372,7 @@ public class AIThing : MonoBehaviour
         var v = JsonConvert.DeserializeObject<GetResponse>(content.ReadAsStringAsync().Result);
         if (v.state == null || v.state.status == "pending" || v.state.status == "started" || v.state.status == "attempt_failed")
         {
-            yield return new WaitForSeconds(1.5f); // for rate limiting
+            yield return new WaitForSeconds(1.5f);
             yield return Speak(d);
         }
         else if (v.state.status == "complete_success")
@@ -380,7 +391,6 @@ public class AIThing : MonoBehaviour
                     {
                         if (obj != null)
                         {
-                            // Start coroutine for each object to turn towards the speaker
                             StartCoroutine(TurnToSpeaker(obj.transform, t));
                         }
                     }
@@ -391,7 +401,7 @@ public class AIThing : MonoBehaviour
                 subtitles.text = d.text;
 
             using (var uwr = UnityWebRequestMultimedia.GetAudioClip($"https://storage.googleapis.com/vocodes-public{v.state.maybe_public_bucket_wav_audio_path}",
-                AudioType.WAV)) //https://docs.unity3d.com/ScriptReference/Networking.UnityWebRequestMultimedia.GetAudioClip.html
+                AudioType.WAV))
             {
                 yield return uwr.SendWebRequest();
                 if (uwr.result == UnityWebRequest.Result.ConnectionError)
@@ -401,25 +411,24 @@ public class AIThing : MonoBehaviour
                 else
                 {
                     audioSource.clip = DownloadHandlerAudioClip.GetContent(uwr);
-                    //Gary meow, Put meowing in the inspector
+
                     if (d.character == "squidward")
                     {
                         float[] clipData = new float[audioSource.clip.samples * audioSource.clip.channels];
                         audioSource.clip.GetData(clipData, 0);
                         for (int i = 0; i < clipData.Length; i++)
                         {
-                            clipData[i] *= 2f;
+                            clipData[i] *= 1.5f;
                         }
 
                         audioSource.clip.SetData(clipData, 0);
                     }
-                    else if (d.character == "Gary")
+                    else if (d.character == "gary")
                     {
                         audioSource = GetComponent<AudioSource>();
                         audioSource.clip = audioClips[0];
 
                         audioSource.Play();
-
 
                         audioSource.Stop();
                     }
@@ -427,21 +436,17 @@ public class AIThing : MonoBehaviour
                     GameObject character = GameObject.Find(d.character);
                     if (character != null)
                     {
-                        // Get the Animator component attached to the character
                         Animator characterAnimator = character.GetComponent<Animator>();
                         if (characterAnimator != null)
                         {
-                            // Start the speaking animation
                             characterAnimator.SetBool("isSpeaking", true);
                         }
                     }
 
                     audioSource.Play();
 
-                    // Wait for the audio clip to finish playing
                     yield return new WaitForSeconds(audioSource.clip.length);
 
-                    // Stop the speaking animation
                     if (character != null)
                     {
                         Animator characterAnimator = character.GetComponent<Animator>();
@@ -458,18 +463,12 @@ public class AIThing : MonoBehaviour
         }
         else
         {
-            // Create a new voice request
             string newUuid = null;
-
-            // Create a new voice request
             yield return CreateNewVoiceRequest(d, result => { newUuid = result; });
 
             if (!string.IsNullOrEmpty(newUuid))
             {
-                // Update the uuid of the dialogue
                 d.uuid = newUuid;
-
-                // Recursively call Speak with the updated dialogue
                 yield return Speak(d);
             }
             else
