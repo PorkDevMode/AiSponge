@@ -40,7 +40,15 @@ public class AIThing : MonoBehaviour
     private HttpClient _client = new();
     private OpenAIApi _openAI;
     // Start is called before the first frame update
+    public VideoClip clipToPlay;
+    IEnumerator LoadSceneAfterDelay(string sceneName, float delay)
+    {
+        // Wait for the specified delay
+        yield return new WaitForSeconds(delay);
 
+        // Load the scene
+        SceneManager.LoadScene(sceneName);
+    }
     void Start()
 
 
@@ -89,9 +97,19 @@ public class AIThing : MonoBehaviour
         }
 
         // Pick a random topic
+        // Pick a random topic
         List<string> topics =
             JsonConvert.DeserializeObject<List<string>>(
                 File.ReadAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\topics.json"));
+
+        // If there are no topics, play a video clip and restart in 10 seconds
+        if (topics.Count == 0)
+        {
+            videoPlayer.clip = clipToPlay;
+            videoPlayer.Play();
+
+            StartCoroutine(LoadSceneAfterDelay("1.0.1", 5.0f));
+        }
         string topic = topics[_random.Next(0, topics.Count)];
 
         // Add the chosen topic to the blacklist and write it back to the file
@@ -199,6 +217,12 @@ public class AIThing : MonoBehaviour
                 textToSay = line.Replace("Sandy:", "");
                 character = "sandy";
             }
+            else if (line.StartsWith("Gary:"))
+            {
+                voicemodelUuid = "TM:eaachm5yecgz";
+                textToSay = line.Replace("Gary:", "");
+                character = "gary";
+            }
 
             if (textToSay == "")
                 continue;
@@ -245,8 +269,8 @@ public class AIThing : MonoBehaviour
         {
             Model = "text-davinci-002",
             Prompt =
-                $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with character dialogue. Around 10-14 lines of dialogue with talking only. The topic is: {topic}",
-            MaxTokens = 400
+                $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with character dialogue. Around 12 - 15 lines of dialogue with talking only and long sentences. The topic is: {topic}",
+            MaxTokens = 700
         };
         var response = await _openAI.CreateCompletion(request);
         if (response.Error != null || response.Choices == null)
@@ -348,6 +372,7 @@ public class AIThing : MonoBehaviour
                 Transform t = GameObject.Find(d.character).transform;
                 _cinemachineVirtualCamera.LookAt = t;
                 _cinemachineVirtualCamera.Follow = t;
+                yield return new WaitForSeconds(1);
 
                 if (gt.Length > 0)
                 {
@@ -377,28 +402,26 @@ public class AIThing : MonoBehaviour
                 {
                     audioSource.clip = DownloadHandlerAudioClip.GetContent(uwr);
                     //Gary meow, Put meowing in the inspector
-                    if (d.character == "Gary")
-                    {
-                        audioSource = GetComponent<AudioSource>();
-                        audioSource.clip = audioClips[1];
-                        yield return new WaitForSeconds(2);
-                        audioSource.Play();
-                        yield return new WaitForSeconds(1);
-
-                        yield return new WaitForSeconds(5);
-
-                        audioSource.Stop();
-                    }
-                    else if (d.character == "Squidward")
+                    if (d.character == "squidward")
                     {
                         float[] clipData = new float[audioSource.clip.samples * audioSource.clip.channels];
                         audioSource.clip.GetData(clipData, 0);
                         for (int i = 0; i < clipData.Length; i++)
                         {
-                            clipData[i] *= 5f;
+                            clipData[i] *= 2f;
                         }
 
                         audioSource.clip.SetData(clipData, 0);
+                    }
+                    else if (d.character == "Gary")
+                    {
+                        audioSource = GetComponent<AudioSource>();
+                        audioSource.clip = audioClips[0];
+
+                        audioSource.Play();
+
+
+                        audioSource.Stop();
                     }
 
                     GameObject character = GameObject.Find(d.character);
