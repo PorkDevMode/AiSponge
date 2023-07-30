@@ -101,7 +101,6 @@ public class AIThing : MonoBehaviour
             File.WriteAllText(blacklistPath, JsonConvert.SerializeObject(blacklist));
         }
 
-
         //play the timecards/intro
         if (_clips.Count > 0)
         {
@@ -124,7 +123,14 @@ public class AIThing : MonoBehaviour
 
         Generate(topic);
     }
+    IEnumerator RetryGenerateAfterDelay(string topic)
+    {
+        // Wait for 15 seconds
+        yield return new WaitForSeconds(15);
 
+        // Retry Generate method
+        Generate(topic);
+    }
     async void Generate(string topic)
     {
         string[] text = new[] { "" };
@@ -212,6 +218,7 @@ public class AIThing : MonoBehaviour
                 SpeakResponse speakResponse = JsonConvert.DeserializeObject<SpeakResponse>(responseString);
                 if (!speakResponse.success)
                 {
+                    await Task.Delay(15000); // wait for 15 seconds before retrying
                     continue;
                 }
 
@@ -224,7 +231,7 @@ public class AIThing : MonoBehaviour
                     character = character
                 });
                 Debug.Log(responseString);
-                await Task.Delay(6000); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
+                await Task.Delay(4500); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
             }
         }
 
@@ -355,7 +362,7 @@ public class AIThing : MonoBehaviour
                 }
             }
 
-                if (subtitles != null)
+            if (subtitles != null)
                 subtitles.text = d.text;
 
             using (var uwr = UnityWebRequestMultimedia.GetAudioClip($"https://storage.googleapis.com/vocodes-public{v.state.maybe_public_bucket_wav_audio_path}",
@@ -374,7 +381,9 @@ public class AIThing : MonoBehaviour
                     {
                         audioSource = GetComponent<AudioSource>();
                         audioSource.clip = audioClips[1];
+                        yield return new WaitForSeconds(2);
                         audioSource.Play();
+                        yield return new WaitForSeconds(1);
 
                         yield return new WaitForSeconds(5);
 
@@ -386,7 +395,7 @@ public class AIThing : MonoBehaviour
                         audioSource.clip.GetData(clipData, 0);
                         for (int i = 0; i < clipData.Length; i++)
                         {
-                            clipData[i] *= 1.5f;
+                            clipData[i] *= 5f;
                         }
 
                         audioSource.clip.SetData(clipData, 0);
