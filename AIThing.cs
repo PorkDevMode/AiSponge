@@ -39,7 +39,7 @@ public class AIThing : MonoBehaviour
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private TextMeshProUGUI topicText;
     [SerializeField] public AudioClip[] audioClips; // Put in here for a character like Gary that does not have a voice model and speaks gibberish
-    
+
 
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
     [SerializeField] private TextMeshProUGUI subtitles;
@@ -136,7 +136,7 @@ public class AIThing : MonoBehaviour
 
     private void ConfigureHttpClient(string cookie)
     {
-        _client.DefaultRequestHeaders.Add("Authorization", cookie);
+        _client.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _client.DefaultRequestHeaders.Add("Accept", "application/json");
 
         // Set proxy for HttpClientHandler
@@ -146,7 +146,7 @@ public class AIThing : MonoBehaviour
         _clientHandler.UseProxy = true;
         _clientHandler.Proxy = proxy;
 
-        _fakeYouClient.DefaultRequestHeaders.Add("Authorization", cookie);
+        _fakeYouClient.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
     }
 
@@ -371,7 +371,7 @@ public class AIThing : MonoBehaviour
             httpClientHandler.UseProxy = true;
             httpClientHandler.Proxy = proxy;
             HttpClient fakeYouClient = new HttpClient(httpClientHandler);
-            fakeYouClient.DefaultRequestHeaders.Add("Authorization", _client.DefaultRequestHeaders.GetValues("Authorization").First());
+            fakeYouClient.DefaultRequestHeaders.Add("Cookie", _client.DefaultRequestHeaders.GetValues("Cookie").First());
             fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
             // Make the request
