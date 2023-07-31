@@ -32,7 +32,29 @@ public class AIThing : MonoBehaviour
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private TextMeshProUGUI topicText;
     [SerializeField] public AudioClip[] audioClips; // Put in here for a character like gary that does not have a voicemodel and speaks gibberish
+    [SerializeField] private List<string> proxies;
+    private int currentProxyIndex = 0;
 
+
+
+    private string GetNextProxy()
+    {
+        if (currentProxyIndex >= proxies.Count)
+            currentProxyIndex = 0;
+
+        return proxies[currentProxyIndex++];
+    }
+
+    // 3. Configure HttpClient to use the selected proxy:
+    private HttpClient GetHttpClientWithProxy()
+    {
+        var handler = new HttpClientHandler
+        {
+            Proxy = new WebProxy(GetNextProxy())
+        };
+
+        return new HttpClient(handler);
+    }
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
     [SerializeField] private TextMeshProUGUI subtitles;
     [SerializeField] private VideoPlayer videoPlayer;
@@ -108,7 +130,7 @@ public class AIThing : MonoBehaviour
 
         if (topicText != null)
         {
-            topicText.text = "Current Topic: " + topic;
+            topicText.text = "Next Topic: " + topic;
         }
         // Add the chosen topic to the blacklist and write it back to the file
         if (!blacklist.Contains(topic))
@@ -275,7 +297,7 @@ public class AIThing : MonoBehaviour
                 character = character
             });
             Debug.Log(responseString);
-            await Task.Delay(6000); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
+            await Task.Delay(5500); // for rate limiting. rate limit is so fucking annoying that you get limited even with 3 second delay
         }
     }
 
