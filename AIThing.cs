@@ -17,11 +17,18 @@ using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 using UnityEngine.Video;
 using System.Net;
+using Y2Sharp;
 
 #pragma warning disable CS4014
-
 public class AIThing : MonoBehaviour
 {
+
+
+
+
+
+
+
     private Random _random = new Random();
 
     // Should probably change this to a safer method of storing the keys
@@ -32,28 +39,7 @@ public class AIThing : MonoBehaviour
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private TextMeshProUGUI topicText;
     [SerializeField] public AudioClip[] audioClips; // Put in here for a character like Gary that does not have a voice model and speaks gibberish
-    [SerializeField] private List<string> proxies;
-    private int currentProxyIndex = 0;
-
-    // Fetches the next proxy from the list, cycling back to the start if necessary
-    private string GetNextProxy()
-    {
-        if (currentProxyIndex >= proxies.Count)
-            currentProxyIndex = 0;
-
-        return proxies[currentProxyIndex++];
-    }
-
-    // Configures HttpClient to use the selected proxy:
-    private HttpClient GetHttpClientWithProxy()
-    {
-        var handler = new HttpClientHandler
-        {
-            Proxy = new WebProxy(GetNextProxy())
-        };
-
-        return new HttpClient(handler);
-    }
+    
 
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
     [SerializeField] private TextMeshProUGUI subtitles;
@@ -116,7 +102,9 @@ public class AIThing : MonoBehaviour
             Generate(topic);
         }
     }
-
+    private int _proxyIndex = 0;
+    [SerializeField] private string[] proxyArray;
+    private HttpClientHandler _clientHandler = new HttpClientHandler();
     private string LoadCookie()
     {
         string cookieFilePath = $"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt";
@@ -150,6 +138,16 @@ public class AIThing : MonoBehaviour
     {
         _client.DefaultRequestHeaders.Add("Authorization", cookie);
         _client.DefaultRequestHeaders.Add("Accept", "application/json");
+
+        // Set proxy for HttpClientHandler
+        string[] proxyParts = proxyArray[_proxyIndex].Split(':');
+        var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
+        proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
+        _clientHandler.UseProxy = true;
+        _clientHandler.Proxy = proxy;
+
+        _fakeYouClient.DefaultRequestHeaders.Add("Authorization", cookie);
+        _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
     }
 
     private List<string> LoadBlacklist()
@@ -207,6 +205,11 @@ public class AIThing : MonoBehaviour
         audioSource.Play();
         StartCoroutine(WaitForTransition(topic));
     }
+    public AIThing()
+    {
+        _fakeYouClient = new HttpClient(_clientHandler);
+    }
+    private HttpClient _fakeYouClient; // This client will be used for FakeYou API calls
 
     private IEnumerator WaitForTransition(string topic)
     {
@@ -324,6 +327,24 @@ public class AIThing : MonoBehaviour
             textToSay = line.Replace("Gary:", "");
             character = "gary";
         }
+        else if (line.StartsWith("Plankton:"))
+        {
+            voicemodelUuid = "TM:ym446j7wkewg";
+            textToSay = line.Replace("Plankton:", "");
+            character = "plankton";
+        }
+        else if (line.StartsWith("Larry The Lobster:"))
+        {
+            voicemodelUuid = "TM:t57xkhm1t12q";
+            textToSay = line.Replace("Larry The Lobster:", "");
+            character = "larry";
+        }
+        else if (line.StartsWith("Mrs. Puff:"))
+        {
+            voicemodelUuid = "TM:qk21zf5vrde7";
+            textToSay = line.Replace("Mrs. Puff:", "");
+            character = "mrspuff";
+        }
 
         return textToSay != "";
     }
@@ -341,7 +362,20 @@ public class AIThing : MonoBehaviour
         bool retry = true;
         while (retry)
         {
-            var response2 = await _client.PostAsync("https://api.fakeyou.com/tts/inference", content);
+            // Update the HttpClient to use the next proxy
+            _proxyIndex = (_proxyIndex + 1) % proxyArray.Length; // This will loop back to 0 when it reaches the end of the array
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            string[] proxyParts = proxyArray[_proxyIndex].Split(':');
+            var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
+            proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
+            httpClientHandler.UseProxy = true;
+            httpClientHandler.Proxy = proxy;
+            HttpClient fakeYouClient = new HttpClient(httpClientHandler);
+            fakeYouClient.DefaultRequestHeaders.Add("Authorization", _client.DefaultRequestHeaders.GetValues("Authorization").First());
+            fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
+
+            // Make the request
+            var response2 = await fakeYouClient.PostAsync("https://api.fakeyou.com/tts/inference", content);
             var responseString = await response2.Content.ReadAsStringAsync();
             SpeakResponse speakResponse = null;
             try
@@ -369,7 +403,7 @@ public class AIThing : MonoBehaviour
                 character = character
             });
             Debug.Log(responseString);
-            await Task.Delay(5500); // For rate limiting. The rate limit is so annoying that you get limited even with a 3 second delay
+            await Task.Delay(100); // For rate limiting. The rate limit is so annoying that you get limited even with a 3 second delay
         }
     }
 
@@ -378,7 +412,7 @@ public class AIThing : MonoBehaviour
         var request = new CreateCompletionRequest
         {
             Model = "text-davinci-003",
-            Prompt = $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs and very rarely Gary. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
+            Prompt = $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs, Larry The Lobster, Plankton and very rarely Gary and Mrs. Puff. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
             MaxTokens = 700
         };
         var response = await _openAI.CreateCompletion(request);
@@ -555,7 +589,6 @@ public class AIThing : MonoBehaviour
                         characterAnimator.SetBool("isSpeaking", true);
                     }
                 }
-
                 audioSource.Play();
                 yield return new WaitForSeconds(audioSource.clip.length);
 
