@@ -140,7 +140,7 @@ public class AIThing : MonoBehaviour
     {
         _client.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _client.DefaultRequestHeaders.Add("Accept", "application/json");
-        _client.DefaultRequestHeaders.Add("credentials", "include");
+
 
         // Set proxy for HttpClientHandler
         string[] proxyParts = proxyArray[_proxyIndex].Split(':');
@@ -151,7 +151,7 @@ public class AIThing : MonoBehaviour
 
         _fakeYouClient.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
-        _fakeYouClient.DefaultRequestHeaders.Add("credentials", "include");
+
     }
     private async Task CheckCookieValidity(HttpClient client)
     {
