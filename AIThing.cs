@@ -73,6 +73,8 @@ public class AIThing : MonoBehaviour
 
         ConfigureHttpClient(cookie);
 
+        // Check cookie validity
+        await CheckCookieValidity(_client);
         // Read the blacklist
         List<string> blacklist = LoadBlacklist();
 
@@ -138,6 +140,7 @@ public class AIThing : MonoBehaviour
     {
         _client.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _client.DefaultRequestHeaders.Add("Accept", "application/json");
+        _client.DefaultRequestHeaders.Add("credentials", "include");
 
         // Set proxy for HttpClientHandler
         string[] proxyParts = proxyArray[_proxyIndex].Split(':');
@@ -148,6 +151,13 @@ public class AIThing : MonoBehaviour
 
         _fakeYouClient.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
         _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
+        _fakeYouClient.DefaultRequestHeaders.Add("credentials", "include");
+    }
+    private async Task CheckCookieValidity(HttpClient client)
+    {
+        var checkKey = await client.GetAsync("https://api.fakeyou.com/v1/billing/active_subscriptions");
+        var checkString = await checkKey.Content.ReadAsStringAsync();
+        Debug.Log(checkString);
     }
 
     private List<string> LoadBlacklist()
