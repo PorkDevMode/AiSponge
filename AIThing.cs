@@ -124,34 +124,39 @@ public class AIThing : MonoBehaviour
             password = fakeYouPassword
         };
 
-        var response = await _client.PostAsync("https://api.fakeyou.com/login",
+        var handler = new HttpClientHandler();
+        handler.CookieContainer = new CookieContainer();
+        var client = new HttpClient(handler);
+
+        var response = await client.PostAsync("https://api.fakeyou.com/login",
             new StringContent(JsonConvert.SerializeObject(loginDetails), Encoding.UTF8, "application/json"));
 
-        var cookieData = JsonConvert.SerializeObject(response.Headers.GetValues("set-cookie").First());
-        var cookieParts = cookieData.Split(';');
-        string cookie = cookieParts[0].Replace("session=", "").Replace("\"", "");
+        var responseUri = new Uri("https://api.fakeyou.com");
+        var cookieData = handler.CookieContainer.GetCookies(responseUri)["session"].Value;
 
-        File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", cookie);
+        File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", cookieData);
 
-        return cookie;
+        return cookieData;
     }
 
     private void ConfigureHttpClient(string cookie)
     {
-        _client.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
-        _client.DefaultRequestHeaders.Add("Accept", "application/json");
+        var handler = new HttpClientHandler();
+        handler.CookieContainer = new CookieContainer();
+        handler.CookieContainer.Add(new Uri("https://api.fakeyou.com"), new Cookie("session", cookie));
 
+        _client = new HttpClient(handler);
+        _client.DefaultRequestHeaders.Add("Accept", "application/json");
 
         // Set proxy for HttpClientHandler
         string[] proxyParts = proxyArray[_proxyIndex].Split(':');
         var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
         proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
-        _clientHandler.UseProxy = true;
-        _clientHandler.Proxy = proxy;
+        handler.UseProxy = true;  // Use the same handler
+        handler.Proxy = proxy;
 
-        _fakeYouClient.DefaultRequestHeaders.Add("Cookie", $"session={cookie}");
+        _fakeYouClient = new HttpClient(handler);  // Create _fakeYouClient with the handler
         _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
-
     }
     private async Task CheckCookieValidity(HttpClient client)
     {
@@ -322,7 +327,7 @@ public class AIThing : MonoBehaviour
         {
             voicemodelUuid = "TM:4e2xqpwqaggr";
             textToSay = line.Replace("Squidward:", "").ToUpper(); // Converting to caps because funny Loudward
-            textToSay = textToSay.TrimEnd() + "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"; // Add "!" at the end of Squidward's sentences
+            textToSay = textToSay.TrimEnd() + "!"; // Add "!" at the end of Squidward's sentences
             character = "squidward";
         }
         else if (line.StartsWith("Sandy:"))
@@ -380,8 +385,14 @@ public class AIThing : MonoBehaviour
             proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
             httpClientHandler.UseProxy = true;
             httpClientHandler.Proxy = proxy;
+
+            // Set up the CookieContainer
+            CookieContainer cookieContainer = new CookieContainer();
+            cookieContainer.Add(new Uri("https://api.fakeyou.com"), new Cookie("session", "replace with cookie generated in key.tx 2 lazy to fix rn")); // Replace this with your cookie if you have fakeyou premium
+            httpClientHandler.CookieContainer = cookieContainer;
+
+            // Create the new HttpClient
             HttpClient fakeYouClient = new HttpClient(httpClientHandler);
-            fakeYouClient.DefaultRequestHeaders.Add("Cookie", _client.DefaultRequestHeaders.GetValues("Cookie").First());
             fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
             // Make the request
