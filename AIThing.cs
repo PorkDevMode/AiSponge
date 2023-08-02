@@ -317,10 +317,10 @@ public class AIThing : MonoBehaviour
             voicemodelUuid = "TM:ptcaavcfhwxd";
             character = "patrick";
         }
-        else if (line.StartsWith("Mr. Krabs"))
+        else if (line.StartsWith("Mr. Krabs:"))
         {
             voicemodelUuid = "TM:ade4ta7rc720";
-            textToSay = line.Replace("Mr. Krabs", "");
+            textToSay = line.Replace("Mr. Krabs:", "");
             character = "mrkrabs";
         }
         else if (line.StartsWith("Squidward:"))
