@@ -28,7 +28,6 @@ public class AIThing : MonoBehaviour
 
 
 
-
     private Random _random = new Random();
 
     // Should probably change this to a safer method of storing the keys
@@ -50,6 +49,56 @@ public class AIThing : MonoBehaviour
 
     public VideoClip clipToPlay;
 
+
+    // Singleton instance of the AIDirector script
+    public static AIThing Instance;
+
+    // Reference to the speaking character's animator
+    public Animator speakingCharacterAnimator;
+
+    // Awake method to set up the singleton instance
+    private void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+    }
+    private string previousCharacter;
+    // Call this method when a character starts speaking
+    public void CharacterStartedSpeaking(Animator characterAnimator)
+    {
+        if (characterAnimator != speakingCharacterAnimator)
+        {
+            speakingCharacterAnimator = characterAnimator;
+
+            // Notify all non-speaking characters about the speaking character
+            AIMovement[] aiMovements = FindObjectsOfType<AIMovement>();
+            foreach (AIMovement aiMovement in aiMovements)
+            {
+                // Set the speaking character's transform as the target for non-speaking characters to look at
+                aiMovement.speakingCharacterTransform = speakingCharacterAnimator.transform;
+            }
+        }
+    }
+
+    // Call this method when a character stops speaking
+    public void CharacterStoppedSpeaking(Animator characterAnimator)
+    {
+        if (characterAnimator == speakingCharacterAnimator)
+        {
+            speakingCharacterAnimator = null;
+
+            // Notify all non-speaking characters that there is no speaking character anymore
+            AIMovement[] aiMovements = FindObjectsOfType<AIMovement>();
+            foreach (AIMovement aiMovement in aiMovements)
+            {
+                // Clear the target for non-speaking characters to look at
+                aiMovement.speakingCharacterTransform = null;
+            }
+        }
+    }
+
     IEnumerator LoadSceneAfterDelay(string sceneName, float delay)
     {
         yield return new WaitForSeconds(delay);
@@ -60,8 +109,19 @@ public class AIThing : MonoBehaviour
     {
         _openAI = new OpenAIApi(openAIKey);
         Init();
+        characters.Add("spongebob", GameObject.Find("spongebob"));
+        characters.Add("patrick", GameObject.Find("patrick"));
+        characters.Add("squidward", GameObject.Find("squidward"));
+        characters.Add("mrkrabs", GameObject.Find("mrkrabs"));
+        characters.Add("gary", GameObject.Find("gary"));
+        characters.Add("plankton", GameObject.Find("plankton"));
+        characters.Add("larry", GameObject.Find("larry"));
+        characters.Add("mrspuff", GameObject.Find("mrspuff"));
+        characters.Add("sandy", GameObject.Find("sandy"));
+        previousCharacter = "";
+        currentCharacter = "";
     }
-
+    private string currentCharacter;
     async void Init()
     {
         string cookie = LoadCookie();
@@ -84,7 +144,7 @@ public class AIThing : MonoBehaviour
         // If there are no topics, play a video clip and restart in 10 seconds
         if (topics.Count == 0)
         {
-            PlayVideoClipAndWait(clipToPlay, "1.0.1", 5.0f);
+            PlayVideoClipAndWait(clipToPlay, "1.0.1", 15f);
             return;
         }
 
@@ -124,19 +184,16 @@ public class AIThing : MonoBehaviour
             password = fakeYouPassword
         };
 
-        var handler = new HttpClientHandler();
-        handler.CookieContainer = new CookieContainer();
-        var client = new HttpClient(handler);
-
-        var response = await client.PostAsync("https://api.fakeyou.com/login",
+        var response = await _client.PostAsync("https://api.fakeyou.com/login",
             new StringContent(JsonConvert.SerializeObject(loginDetails), Encoding.UTF8, "application/json"));
 
-        var responseUri = new Uri("https://api.fakeyou.com");
-        var cookieData = handler.CookieContainer.GetCookies(responseUri)["session"].Value;
+        var cookieData = JsonConvert.SerializeObject(response.Headers.GetValues("set-cookie").First());
+        var cookieParts = cookieData.Split(';');
+        string cookie = cookieParts[0].Replace("session=", "").Replace("\"", "");
 
-        File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", cookieData);
+        File.WriteAllText($"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt", cookie);
 
-        return cookieData;
+        return cookie;
     }
 
     private void ConfigureHttpClient(string cookie)
@@ -144,17 +201,19 @@ public class AIThing : MonoBehaviour
         var handler = new HttpClientHandler();
         handler.CookieContainer = new CookieContainer();
         handler.CookieContainer.Add(new Uri("https://api.fakeyou.com"), new Cookie("session", cookie));
+        if (proxyArray.Length > 0)
+        {
+            // Set proxy for HttpClientHandler only if proxies are available
+            string[] proxyParts = proxyArray[_proxyIndex].Split(':');
+            var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
+            proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
+            handler.UseProxy = true;
+            handler.Proxy = proxy;
+        }
+
 
         _client = new HttpClient(handler);
         _client.DefaultRequestHeaders.Add("Accept", "application/json");
-
-        // Set proxy for HttpClientHandler
-        string[] proxyParts = proxyArray[_proxyIndex].Split(':');
-        var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
-        proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
-        handler.UseProxy = true;  // Use the same handler
-        handler.Proxy = proxy;
-
         _fakeYouClient = new HttpClient(handler);  // Create _fakeYouClient with the handler
         _fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
     }
@@ -241,27 +300,149 @@ public class AIThing : MonoBehaviour
         yield return new WaitForSeconds(15);
         Generate(topic);
     }
+    private Dictionary<string, GameObject> characters = new Dictionary<string, GameObject>();
+    IEnumerator LoadAndPlayAudioClipCoroutine(string path)
+    {
+        using (var uwr = UnityWebRequestMultimedia.GetAudioClip($"file:///{path}", AudioType.MPEG)) // Unity does not support MP3 for this method
+        {
+            yield return uwr.SendWebRequest();
+
+            if (uwr.result == UnityWebRequest.Result.ConnectionError)
+            {
+                Debug.Log(uwr.error);
+            }
+            else
+            {
+                audioSource.clip = DownloadHandlerAudioClip.GetContent(uwr);
+
+                // Look at the character who is singing
+                if (characters.ContainsKey(currentCharacter))
+                {
+                    GameObject character = characters[currentCharacter];
+
+                    previousCharacter = currentCharacter;  // Store the current character as the previous character
+                    currentCharacter = character.name;  // Update the current character
+
+                    _cinemachineVirtualCamera.LookAt = character.transform;
+                    _cinemachineVirtualCamera.Follow = character.transform;
+                    if (characters.ContainsKey(previousCharacter))
+                    {
+                        GameObject previousCharacterObject = characters[previousCharacter];
+                        StartCoroutine(TurnToSpeaker(character.transform, previousCharacterObject.transform));
+                    }
+                    Debug.Log("Camera is now following: " + currentCharacter);  // Debug statement
+                    if (subtitles != null)
+                        subtitles.text = "*sings*";
+                    foreach (GameObject obj in gt)
+                    {
+                        if (obj != null && obj != character)
+                        {
+                            StartCoroutine(TurnToSpeaker(obj.transform, character.transform));
+                        }
+                    }
+
+                    // Get the Animator component from the character
+                    Animator characterAnimator = character.GetComponent<Animator>();
+                    if (characterAnimator != null)
+                    {
+                        // Start the speaking animation
+                        characterAnimator.SetBool("isSpeaking", true);
+                    }
+
+                    audioSource.Play();
+                    while (audioSource.isPlaying)
+                    {
+                        yield return null;
+                    }
+
+                    if (characterAnimator != null)
+                    {
+                        // Stop the speaking animation
+                        characterAnimator.SetBool("isSpeaking", false);
+                    }
+
+                    // After the audio is finished playing, reload the scene
+                    string currentSceneName = SceneManager.GetActiveScene().name;
+                    SceneManager.LoadScene(currentSceneName);
+                }
+                else
+                {
+                    Debug.LogError("Character not found in dictionary: " + currentCharacter);  // Debug statement
+                    string currentSceneName = SceneManager.GetActiveScene().name;
+                    SceneManager.LoadScene(currentSceneName);
+                }
+            }
+        }
+    }
 
     async void Generate(string topic)
     {
-        string[] text = CheckAndGetScriptLines();
+        // Define dialogues at the beginning of the function
         List<Dialogue> dialogues = new List<Dialogue>();
 
-        if (text.Length == 0)
+        // Check if the topic contains a YouTube link
+        if (topic.Contains(" sings www.youtube.com/watch?v="))
         {
-            await GenerateNext(topic);
-            text = LoadScriptLines();
-            string newTopic = SelectTopic(LoadTopics());
-            GenerateNext(newTopic);
+            // Split the topic string to get the character and the video ID
+            string[] topicParts = topic.Split(new string[] { " sings www.youtube.com/watch?v=" }, StringSplitOptions.None);
+            string character = topicParts[0].ToLower();
+            string videoId = topicParts[1];
+
+            // Fetch the information for the YouTube video
+            await Y2Sharp.Youtube.Video.GetInfo(videoId);
+
+            // Create a new Y2Sharp.Youtube.Video object
+            var video = new Y2Sharp.Youtube.Video();
+
+            // Check if the Audio directory exists, if not, create it
+            string audioDirectoryPath = Path.Combine(Application.dataPath, "Audio");
+            if (!Directory.Exists(audioDirectoryPath))
+            {
+                Directory.CreateDirectory(audioDirectoryPath);
+            }
+
+            // Define the path where the audio file will be saved
+            string audioFilePath = Path.Combine(audioDirectoryPath, $"{videoId}.wav");
+
+            // Download the video as a WAV file
+            await video.DownloadAsync(audioFilePath, "mp3", "128");
+
+            // Add a new dialogue item that represents the character singing
+            dialogues.Add(new Dialogue
+            {
+                uuid = videoId, // We'll use the YouTube video ID as the UUID for this dialogue item
+                text = "*sings*", // The character is singing
+                character = character // The character is the one extracted from the topic
+            });
+
+            // Store the current character who is singing
+            currentCharacter = character;
+            Debug.Log("Singing character: " + currentCharacter);  // Debug statement
+
+            // Start the coroutine that loads and plays the audio file
+            StartCoroutine(LoadAndPlayAudioClipCoroutine(audioFilePath));
+
         }
         else
         {
-            GenerateNext(topic);
-        }
+            string[] text = CheckAndGetScriptLines();
 
-        List<Task> ttsTasks = CreateTTSRequestTasks(text, dialogues);
-        await Task.WhenAll(ttsTasks);
-        StartCoroutine(Speak(dialogues));
+            if (text.Length == 0)
+            {
+                await GenerateNext(topic);
+                text = LoadScriptLines();
+                string newTopic = SelectTopic(LoadTopics());
+                GenerateNext(newTopic);
+            }
+            else
+            {
+                GenerateNext(topic);
+            }
+
+            List<Task> ttsTasks = CreateTTSRequestTasks(text, dialogues);
+            await Task.WhenAll(ttsTasks);
+            StartCoroutine(Speak(dialogues));
+        }
     }
 
     private string[] CheckAndGetScriptLines()
@@ -360,6 +541,12 @@ public class AIThing : MonoBehaviour
             textToSay = line.Replace("Mrs. Puff:", "");
             character = "mrspuff";
         }
+        else if (line.StartsWith("French Narrator:"))
+        {
+            voicemodelUuid = "TM:vjzq7981swey";
+            textToSay = line.Replace("French Narrator:", "");
+            character = "narrator";
+        }
 
         return textToSay != "";
     }
@@ -377,22 +564,28 @@ public class AIThing : MonoBehaviour
         bool retry = true;
         while (retry)
         {
-            // Update the HttpClient to use the next proxy
-            _proxyIndex = (_proxyIndex + 1) % proxyArray.Length; // This will loop back to 0 when it reaches the end of the array
             HttpClientHandler httpClientHandler = new HttpClientHandler();
-            string[] proxyParts = proxyArray[_proxyIndex].Split(':');
-            var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
-            proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
-            httpClientHandler.UseProxy = true;
-            httpClientHandler.Proxy = proxy;
+
+            if (proxyArray.Length > 0)
+            {
+                // Update the HttpClient to use the next proxy
+                _proxyIndex = (_proxyIndex + 1) % proxyArray.Length; // This will loop back to 0 when it reaches the end of the array
+                string[] proxyParts = proxyArray[_proxyIndex].Split(':');
+                var proxy = new WebProxy(proxyParts[0] + ":" + proxyParts[1]);
+                proxy.Credentials = new NetworkCredential(proxyParts[2], proxyParts[3]);
+                httpClientHandler.UseProxy = true;
+                httpClientHandler.Proxy = proxy;
+            }
 
             // Set up the CookieContainer
             CookieContainer cookieContainer = new CookieContainer();
-            cookieContainer.Add(new Uri("https://api.fakeyou.com"), new Cookie("session", "replace with cookie generated in key.tx 2 lazy to fix rn")); // Replace this with your cookie if you have fakeyou premium
+            string cookieFilePath = $"{Environment.CurrentDirectory}\\Assets\\Scripts\\key.txt";
+            string cookieData = File.Exists(cookieFilePath) ? File.ReadAllText(cookieFilePath) : "";
+            cookieContainer.Add(new Uri("https://api.fakeyou.com"), new Cookie("session", cookieData));
             httpClientHandler.CookieContainer = cookieContainer;
 
             // Create the new HttpClient
-            HttpClient fakeYouClient = new HttpClient(httpClientHandler);
+            HttpClient fakeYouClient = proxyArray.Length > 0 ? new HttpClient(httpClientHandler) : _client;
             fakeYouClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
             // Make the request
@@ -424,7 +617,7 @@ public class AIThing : MonoBehaviour
                 character = character
             });
             Debug.Log(responseString);
-            await Task.Delay(100); // For rate limiting. The rate limit is so annoying that you get limited even with a 3 second delay
+            await Task.Delay(250); // For rate limiting, With proxys set to 250, Without set to 5500
         }
     }
 
@@ -433,7 +626,7 @@ public class AIThing : MonoBehaviour
         var request = new CreateCompletionRequest
         {
             Model = "text-davinci-003",
-            Prompt = $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs, Larry The Lobster, Plankton and very rarely Gary and Mrs. Puff. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
+            Prompt = $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs, Larry The Lobster, Plankton and very rarely Gary, Mrs. Puff and French Narrator. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
             MaxTokens = 700
         };
         var response = await _openAI.CreateCompletion(request);
@@ -551,15 +744,28 @@ public class AIThing : MonoBehaviour
         {
             GameObject character = GameObject.Find(d.character);
             Transform t = GameObject.Find(d.character).transform;
+
+            // Update previous and current character
+            previousCharacter = currentCharacter;
+            currentCharacter = d.character;
+
             _cinemachineVirtualCamera.LookAt = t;
             _cinemachineVirtualCamera.Follow = t;
+
+            // Turn the current speaker towards the previous speaker
+            if (characters.ContainsKey(previousCharacter))
+            {
+                GameObject previousCharacterObject = characters[previousCharacter];
+                StartCoroutine(TurnToSpeaker(t, previousCharacterObject.transform));
+            }
+
             yield return new WaitForSeconds(1);
 
             if (gt.Length > 0)
             {
                 foreach (GameObject obj in gt)
                 {
-                    if (obj != null)
+                    if (obj != null && obj != character)
                     {
                         StartCoroutine(TurnToSpeaker(obj.transform, t));
                     }
@@ -587,7 +793,7 @@ public class AIThing : MonoBehaviour
                     audioSource.clip.GetData(clipData, 0);
                     for (int i = 0; i < clipData.Length; i++)
                     {
-                        clipData[i] *= 1.5f;
+                        clipData[i] *= 1.1f;
                     }
 
                     audioSource.clip.SetData(clipData, 0);
@@ -610,8 +816,13 @@ public class AIThing : MonoBehaviour
                         characterAnimator.SetBool("isSpeaking", true);
                     }
                 }
+
                 audioSource.Play();
-                yield return new WaitForSeconds(audioSource.clip.length);
+
+                while (audioSource.isPlaying)
+                {
+                    yield return null;
+                }
 
                 if (character != null)
                 {
