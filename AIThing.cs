@@ -29,7 +29,10 @@ public class AIThing : MonoBehaviour
 
 
     private Random _random = new Random();
-    [SerializeField] private Transform[] spawnPoints;
+    [SerializeField] private Transform[] KrustyKrab;
+    [SerializeField] private Transform[] ConchStreet;
+    [SerializeField] private Transform[] OutsideKrustyKrab;
+    [SerializeField] private Transform[] SquidwardLocations;
     // Should probably change this to a safer method of storing the keys
     [SerializeField] private string openAIKey;
     [SerializeField] private string fakeYouUsernameOrEMail;
@@ -58,6 +61,26 @@ public class AIThing : MonoBehaviour
     public Animator speakingCharacterAnimator;
     private void TeleportCharacters()
     {
+        // Map each spawn point group to a Squidward location
+        Dictionary<Transform[], Transform> squidwardLocationMap = new Dictionary<Transform[], Transform>()
+    {
+        { KrustyKrab, SquidwardLocations[0] },
+        { ConchStreet, SquidwardLocations[1] },
+        { OutsideKrustyKrab, SquidwardLocations[2] }
+    };
+
+        // Put your spawn point arrays into a list
+        List<Transform[]> spawnPointGroups = new List<Transform[]>()
+    {
+        KrustyKrab, ConchStreet, OutsideKrustyKrab
+    };
+
+        // Select a random spawn point group
+        Transform[] spawnPoints = spawnPointGroups[_random.Next(spawnPointGroups.Count)];
+
+        // Get Squidward's location for the selected spawn point group
+        Transform squidwardLocation = squidwardLocationMap[spawnPoints];
+
         // Create a list of spawn points and shuffle it
         List<Transform> shuffledSpawnPoints = spawnPoints.OrderBy(x => _random.Next()).ToList();
 
@@ -65,11 +88,16 @@ public class AIThing : MonoBehaviour
 
         foreach (GameObject character in gt)
         {
-            // Skip teleporting Squidward
-            if (character.name == "squidward") continue;
+            // If the character is Squidward, teleport him to his special location
+            if (character.name == "squidward")
+            {
+                character.transform.position = squidwardLocation.position;
+                character.transform.rotation = squidwardLocation.rotation;
+                continue;
+            }
 
             // Select a spawn point from the shuffled list
-            Transform spawnPoint = shuffledSpawnPoints[index];
+            Transform spawnPoint = shuffledSpawnPoints[index % shuffledSpawnPoints.Count];
 
             // Teleport the character to the spawn point
             character.transform.position = spawnPoint.position;
