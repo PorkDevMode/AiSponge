@@ -29,7 +29,7 @@ public class AIThing : MonoBehaviour
 
 
     private Random _random = new Random();
-
+    [SerializeField] private Transform[] spawnPoints;
     // Should probably change this to a safer method of storing the keys
     [SerializeField] private string openAIKey;
     [SerializeField] private string fakeYouUsernameOrEMail;
@@ -43,19 +43,41 @@ public class AIThing : MonoBehaviour
     [SerializeField] private CinemachineVirtualCamera _cinemachineVirtualCamera;
     [SerializeField] private TextMeshProUGUI subtitles;
     [SerializeField] private VideoPlayer videoPlayer;
-    [SerializeField] private List<AudioClip> _clips;
+
+    [SerializeField] private VideoClip[] videoClips;
     private HttpClient _client = new();
     private OpenAIApi _openAI;
 
     public VideoClip clipToPlay;
-
+    public VideoClip clip;
 
     // Singleton instance of the AIDirector script
     public static AIThing Instance;
 
     // Reference to the speaking character's animator
     public Animator speakingCharacterAnimator;
+    private void TeleportCharacters()
+    {
+        // Create a list of spawn points and shuffle it
+        List<Transform> shuffledSpawnPoints = spawnPoints.OrderBy(x => _random.Next()).ToList();
 
+        int index = 0;
+
+        foreach (GameObject character in gt)
+        {
+            // Skip teleporting Squidward
+            if (character.name == "squidward") continue;
+
+            // Select a spawn point from the shuffled list
+            Transform spawnPoint = shuffledSpawnPoints[index];
+
+            // Teleport the character to the spawn point
+            character.transform.position = spawnPoint.position;
+            character.transform.rotation = spawnPoint.rotation;
+
+            index++;
+        }
+    }
     // Awake method to set up the singleton instance
     private void Awake()
     {
@@ -98,7 +120,18 @@ public class AIThing : MonoBehaviour
             }
         }
     }
+    
+    private void PlayRandomVideoClip()
+    {
+        // Select a random video clip from your array
+        VideoClip clip = videoClips[_random.Next(0, videoClips.Length)];
 
+        // Assign the video clip to the VideoPlayer
+        videoPlayer.clip = clip;
+
+        // Start playing the video clip
+        videoPlayer.Play();
+    }
     IEnumerator LoadSceneAfterDelay(string sceneName, float delay)
     {
         yield return new WaitForSeconds(delay);
@@ -107,6 +140,8 @@ public class AIThing : MonoBehaviour
 
     void Start()
     {
+        TeleportCharacters();
+        PlayRandomVideoClip();
         _openAI = new OpenAIApi(openAIKey);
         Init();
         characters.Add("spongebob", GameObject.Find("spongebob"));
@@ -154,16 +189,13 @@ public class AIThing : MonoBehaviour
         // Add the chosen topic to the blacklist and write it back to the file
         UpdateBlacklist(blacklist, topic);
 
-        // Play the timecards/intro
-        if (_clips.Count > 0)
-        {
-            PlayRandomClipAndWaitForTransition(topic);
-        }
-        else
-        {
-            Generate(topic);
-        }
+        // Play the random video clip
+        
+
+        // Generate the dialogue
+        Generate(topic);
     }
+
     private int _proxyIndex = 0;
     [SerializeField] private string[] proxyArray;
     private HttpClientHandler _clientHandler = new HttpClientHandler();
@@ -273,12 +305,7 @@ public class AIThing : MonoBehaviour
         }
     }
 
-    private void PlayRandomClipAndWaitForTransition(string topic)
-    {
-        audioSource.clip = _clips[_random.Next(0, _clips.Count)];
-        audioSource.Play();
-        StartCoroutine(WaitForTransition(topic));
-    }
+
     public AIThing()
     {
         _fakeYouClient = new HttpClient(_clientHandler);
@@ -335,7 +362,7 @@ public class AIThing : MonoBehaviour
                         subtitles.text = "*sings*";
                     foreach (GameObject obj in gt)
                     {
-                        if (obj != null && obj != character)
+                        if (obj != null && obj != character && obj.name != "karen")
                         {
                             StartCoroutine(TurnToSpeaker(obj.transform, character.transform));
                         }
@@ -348,7 +375,7 @@ public class AIThing : MonoBehaviour
                         // Start the speaking animation
                         characterAnimator.SetBool("isSpeaking", true);
                     }
-
+                    videoPlayer.Stop();
                     audioSource.Play();
                     while (audioSource.isPlaying)
                     {
@@ -441,6 +468,7 @@ public class AIThing : MonoBehaviour
 
             List<Task> ttsTasks = CreateTTSRequestTasks(text, dialogues);
             await Task.WhenAll(ttsTasks);
+            videoPlayer.Stop();
             StartCoroutine(Speak(dialogues));
         }
     }
@@ -501,7 +529,7 @@ public class AIThing : MonoBehaviour
         else if (line.StartsWith("Mr. Krabs"))
         {
             voicemodelUuid = "TM:ade4ta7rc720";
-            textToSay = line.Replace("Mr. Krabs", "");
+            textToSay = line.Replace("Mr. Krabs:", "");
             character = "mrkrabs";
         }
         else if (line.StartsWith("Squidward:"))
@@ -529,18 +557,6 @@ public class AIThing : MonoBehaviour
             textToSay = line.Replace("Plankton:", "");
             character = "plankton";
         }
-        else if (line.StartsWith("Larry The Lobster:"))
-        {
-            voicemodelUuid = "TM:t57xkhm1t12q";
-            textToSay = line.Replace("Larry The Lobster:", "");
-            character = "larry";
-        }
-        else if (line.StartsWith("Mrs. Puff:"))
-        {
-            voicemodelUuid = "TM:qk21zf5vrde7";
-            textToSay = line.Replace("Mrs. Puff:", "");
-            character = "mrspuff";
-        }
         else if (line.StartsWith("French Narrator:"))
         {
             voicemodelUuid = "TM:vjzq7981swey";
@@ -550,7 +566,7 @@ public class AIThing : MonoBehaviour
 
         return textToSay != "";
     }
-
+   
     private async Task CreateTTSRequest(string textToSay, string voicemodelUuid, List<Dialogue> dialogues, string character)
     {
         var jsonObj = new
@@ -626,7 +642,7 @@ public class AIThing : MonoBehaviour
         var request = new CreateCompletionRequest
         {
             Model = "text-davinci-003",
-            Prompt = $"Create a script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs, Larry The Lobster, Plankton and very rarely Gary, Mrs. Puff and French Narrator. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only and make sure that one character does not talk more than once in row. The topic is: {topic}",
+            Prompt = $"Create a vulgar, nsfw, politically incorrect script for a scene from Spongebob where characters discuss a topic. Possible Characters Include Spongebob, Patrick, Squidward, Sandy, Mr. Krabs, Plankton and very rarely Gary and French Narrator. Use the format: Character: <dialogue>. Only reply with coherent character dialogue. Around 12 - 15 lines of dialogue with talking only. The topic is: {topic}",
             MaxTokens = 700
         };
         var response = await _openAI.CreateCompletion(request);
@@ -765,7 +781,7 @@ public class AIThing : MonoBehaviour
             {
                 foreach (GameObject obj in gt)
                 {
-                    if (obj != null && obj != character)
+                    if (obj != null && obj != character && obj.name != "karen")
                     {
                         StartCoroutine(TurnToSpeaker(obj.transform, t));
                     }
@@ -793,7 +809,7 @@ public class AIThing : MonoBehaviour
                     audioSource.clip.GetData(clipData, 0);
                     for (int i = 0; i < clipData.Length; i++)
                     {
-                        clipData[i] *= 1.1f;
+                        clipData[i] *= 2.0f;
                     }
 
                     audioSource.clip.SetData(clipData, 0);
